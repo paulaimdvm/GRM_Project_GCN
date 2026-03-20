@@ -35,7 +35,8 @@ where $\tilde{A} = A + I$ adds self-loops and $\tilde{D}$ is its degree matrix. 
 ├── README.md
 ├──cora/                   ← cora.content & cora.cites here
 ├──gcn-node-classification/
-    ├── requirements.txt              
+    ├── requirements.txt
+    ├── figure/            
     ├── src/
     │   ├── __init__.py
     │   ├── dataset.py          ← load & split Cora

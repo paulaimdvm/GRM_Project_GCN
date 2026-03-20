@@ -32,20 +32,20 @@ where $\tilde{A} = A + I$ adds self-loops and $\tilde{D}$ is its degree matrix. 
 ## Repository Structure
 
 ```
-gcn-node-classification/
 ├── README.md
-├── requirements.txt              
-├── cora/                   ← cora.content & cora.cites here
-├── src/
-│   ├── __init__.py
-│   ├── dataset.py          ← load & split Cora
-│   ├── preprocess.py       ← normalise adjacency
-│   ├── layers.py           ← GraphConvolution layer
-│   ├── model.py            ← 2-layer GCN
-│   ├── train.py            ← training loop
-│   ├── evaluate.py         ← evaluation helpers
-│   └── utils.py            ← seed, accuracy, logging
-└── gcn.ipynb      ← all-in-one Jupyter notebook
+├──cora/                   ← cora.content & cora.cites here
+├──gcn-node-classification/
+    ├── requirements.txt              
+    ├── src/
+    │   ├── __init__.py
+    │   ├── dataset.py          ← load & split Cora
+    │   ├── preprocess.py       ← normalise adjacency
+    │   ├── layers.py           ← GraphConvolution layer
+    │   ├── model.py            ← 2-layer GCN
+    │   ├── train.py            ← training loop
+    │   ├── evaluate.py         ← evaluation helpers
+    │   └── utils.py            ← seed, accuracy, logging
+    └── gcn.ipynb      ← all-in-one Jupyter notebook
 ```
 
 ---

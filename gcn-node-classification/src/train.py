@@ -9,12 +9,17 @@ user-specified epochs for later visualisation (e.g., t-SNE).
 
 import copy
 import time
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from src.utils import accuracy
+try:
+    from src.utils import accuracy, get_best_device, prepare_graph_tensors
+except ModuleNotFoundError:
+    # Allow direct execution via: python src/train.py
+    from utils import accuracy, get_best_device, prepare_graph_tensors
 
 
 def train_model(
@@ -28,7 +33,8 @@ def train_model(
     weight_decay: float = 5e-4,
     epochs: int = 200,
     verbose: bool = True,
-    snapshot_epochs: list = None,
+    snapshot_epochs: Optional[list] = None,
+    device: Optional[str] = None,
 ):
     """
     Train the GCN model and return training history.
@@ -60,6 +66,17 @@ def train_model(
     """
     if snapshot_epochs is None:
         snapshot_epochs = []
+
+    target_device = get_best_device(device)
+    model = model.to(target_device)
+    features, adj, labels, idx_train, idx_val, _ = prepare_graph_tensors(
+        features=features,
+        adj=adj,
+        labels=labels,
+        idx_train=idx_train,
+        idx_val=idx_val,
+        device=target_device,
+    )
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -116,6 +133,7 @@ def train_model(
 
     elapsed = time.time() - t_start
     if verbose:
+        print(f"Device: {target_device}")
         print(f"\nTraining completed in {elapsed:.2f}s")
 
     return history, snapshots

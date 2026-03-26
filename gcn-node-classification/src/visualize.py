@@ -18,23 +18,22 @@ callers can further customise or save the figure.
 import copy
 import random
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 from celluloid import Camera
 from matplotlib.lines import Line2D
 from sklearn.manifold import TSNE
-
 from src.dataset import CLASSES
-from src.utils import accuracy
-
+from src.utils import accuracy, get_best_device, prepare_graph_tensors
 
 # ---------------------------------------------------------------------------
 #  Training curves
 # ---------------------------------------------------------------------------
+
 
 def plot_training_curves(history: dict) -> plt.Figure:
     """
@@ -80,6 +79,7 @@ def plot_training_curves(history: dict) -> plt.Figure:
 #  Confusion matrix
 # ---------------------------------------------------------------------------
 
+
 def plot_confusion_matrix(
     model,
     features: torch.Tensor,
@@ -87,6 +87,7 @@ def plot_confusion_matrix(
     labels: torch.Tensor,
     idx: torch.Tensor,
     set_name: str = "Test",
+    device: str = None,
 ) -> plt.Figure:
     """
     Compute and display a confusion matrix for the given node subset.
@@ -104,13 +105,23 @@ def plot_confusion_matrix(
     -------
     fig : matplotlib.figure.Figure
     """
+    target_device = get_best_device(device)
+    model = model.to(target_device)
+    features, adj, labels, idx, _, _ = prepare_graph_tensors(
+        features=features,
+        adj=adj,
+        labels=labels,
+        idx_train=idx,
+        device=target_device,
+    )
+
     model.eval()
     with torch.no_grad():
         output = model(features, adj)
         preds = output.argmax(dim=1)
 
-    y_true = labels[idx].numpy()
-    y_pred = preds[idx].numpy()
+    y_true = labels[idx].detach().cpu().numpy()
+    y_pred = preds[idx].detach().cpu().numpy()
 
     n_cls = len(CLASSES)
     conf = np.zeros((n_cls, n_cls), dtype=int)
@@ -130,8 +141,15 @@ def plot_confusion_matrix(
     for i in range(n_cls):
         for j in range(n_cls):
             colour = "white" if conf[i, j] > conf.max() / 2 else "black"
-            ax.text(j, i, str(conf[i, j]), ha="center", va="center",
-                    color=colour, fontsize=10)
+            ax.text(
+                j,
+                i,
+                str(conf[i, j]),
+                ha="center",
+                va="center",
+                color=colour,
+                fontsize=10,
+            )
 
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     plt.tight_layout()
@@ -141,6 +159,7 @@ def plot_confusion_matrix(
 # ---------------------------------------------------------------------------
 #  t-SNE utilities
 # ---------------------------------------------------------------------------
+
 
 def compute_tsne(
     embeddings: np.ndarray,
@@ -200,9 +219,13 @@ def plot_tsne(
     for c in range(n_classes):
         mask = labels == c
         ax.scatter(
-            coords[mask, 0], coords[mask, 1],
-            c=[cmap(c)], label=CLASSES[c],
-            s=12, alpha=0.7, edgecolors="none",
+            coords[mask, 0],
+            coords[mask, 1],
+            c=[cmap(c)],
+            label=CLASSES[c],
+            s=12,
+            alpha=0.7,
+            edgecolors="none",
         )
 
     ax.set_title(title, fontsize=12)
@@ -215,6 +238,7 @@ def plot_tsne(
 # ---------------------------------------------------------------------------
 #  Embedding evolution across training
 # ---------------------------------------------------------------------------
+
 
 def extract_embeddings(model, features, adj):
     """
@@ -244,6 +268,7 @@ def plot_embedding_evolution(
     labels: torch.Tensor,
     perplexity: float = 30.0,
     save_path: str = None,
+    device: str = None,
 ) -> plt.Figure:
     """
     Generate a multi-panel figure showing t-SNE projections of the latent
@@ -266,6 +291,15 @@ def plot_embedding_evolution(
     -------
     fig : matplotlib.figure.Figure
     """
+    target_device = get_best_device(device)
+    model = model.to(target_device)
+    features, adj, labels, _, _, _ = prepare_graph_tensors(
+        features=features,
+        adj=adj,
+        labels=labels,
+        device=target_device,
+    )
+
     sorted_epochs = sorted(snapshots.keys())
     n_panels = len(sorted_epochs)
 
@@ -278,12 +312,13 @@ def plot_embedding_evolution(
     n_rows = (n_panels + n_cols - 1) // n_cols
 
     fig, axes = plt.subplots(
-        n_rows, n_cols,
+        n_rows,
+        n_cols,
         figsize=(6 * n_cols, 5.5 * n_rows),
         squeeze=False,
     )
 
-    labels_np = labels.numpy()
+    labels_np = labels.detach().cpu().numpy()
 
     # Save current state so we can restore it afterwards
     original_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -312,7 +347,8 @@ def plot_embedding_evolution(
 
     fig.suptitle(
         "Evolution of Latent Space During Training (t-SNE)",
-        fontsize=15, y=1.01,
+        fontsize=15,
+        y=1.01,
     )
     plt.tight_layout()
 
@@ -326,6 +362,7 @@ def plot_embedding_evolution(
 # ---------------------------------------------------------------------------
 #  Subgraph extraction
 # ---------------------------------------------------------------------------
+
 
 def extract_subgraph(
     adj: sp.spmatrix,
@@ -415,7 +452,7 @@ def _build_networkx_subgraph(
         for g_neigh in neighbours:
             if g_neigh in global_to_local:
                 local_dst = global_to_local[g_neigh]
-                if local_src < local_dst:          # avoid duplicate edges
+                if local_src < local_dst:  # avoid duplicate edges
                     G.add_edge(local_src, local_dst)
 
     return G, global_to_local
@@ -424,6 +461,7 @@ def _build_networkx_subgraph(
 # ---------------------------------------------------------------------------
 #  Animated graph evolution (celluloid.Camera)
 # ---------------------------------------------------------------------------
+
 
 def animate_graph_evolution(
     model,
@@ -443,6 +481,7 @@ def animate_graph_evolution(
     perplexity: float = 30.0,
     save_path: str = None,
     seed: int = 42,
+    device: str = None,
 ):
     """
     Train a GCN and produce an animation of the subgraph layout evolving
@@ -479,16 +518,29 @@ def animate_graph_evolution(
     -------
     anim : matplotlib.animation.ArtistAnimation
     """
-    from src.utils import set_seed
     import torch.optim as optim
+    from src.utils import set_seed
 
     set_seed(seed)
+    target_device = get_best_device(device)
+    model = model.to(target_device)
+    features, adj_norm, labels, idx_train, idx_val, _ = prepare_graph_tensors(
+        features=features,
+        adj=adj_norm,
+        labels=labels,
+        idx_train=idx_train,
+        idx_val=idx_val,
+        device=target_device,
+    )
 
     # -- Extract or validate subgraph
     if subgraph_nodes is None:
         subgraph_nodes = extract_subgraph(
-            adj_raw, seed_node=None, hops=hops,
-            max_nodes=max_nodes, random_state=seed,
+            adj_raw,
+            seed_node=None,
+            hops=hops,
+            max_nodes=max_nodes,
+            random_state=seed,
         )
     n_sub = len(subgraph_nodes)
     print(f"Subgraph: {n_sub} nodes selected.")
@@ -501,7 +553,12 @@ def animate_graph_evolution(
     effective_perplexity = min(perplexity, max(5.0, (n_sub - 1) / 3.0))
 
     # Ground-truth labels for the subgraph
-    sub_labels = labels[subgraph_nodes].numpy()
+    subgraph_nodes_t = torch.as_tensor(
+        subgraph_nodes,
+        dtype=torch.long,
+        device=labels.device,
+    )
+    sub_labels = labels[subgraph_nodes_t].detach().cpu().numpy()
     n_classes = len(CLASSES)
     cmap = plt.cm.get_cmap("tab10", n_classes)
     node_colours = [cmap(sub_labels[i]) for i in range(n_sub)]
@@ -518,8 +575,13 @@ def animate_graph_evolution(
     # -- Legend (static, drawn once per frame so Camera picks it up)
     legend_handles = [
         Line2D(
-            [0], [0], marker="o", color="w", markerfacecolor=cmap(c),
-            markersize=8, label=CLASSES[c],
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=cmap(c),
+            markersize=8,
+            label=CLASSES[c],
         )
         for c in range(n_classes)
     ]
@@ -541,26 +603,46 @@ def animate_graph_evolution(
         for u, v in edge_list:
             x_coords = [pos[u][0], pos[v][0]]
             y_coords = [pos[u][1], pos[v][1]]
-            ax.plot(x_coords, y_coords, color="grey", alpha=0.15,
-                    linewidth=0.5, zorder=1)
+            ax.plot(
+                x_coords, y_coords, color="grey", alpha=0.15, linewidth=0.5, zorder=1
+            )
 
         # Draw nodes
         xs = [pos[i][0] for i in range(n_sub)]
         ys = [pos[i][1] for i in range(n_sub)]
-        ax.scatter(xs, ys, c=node_colours, s=30, zorder=2,
-                   edgecolors="black", linewidths=0.3, alpha=0.85)
+        ax.scatter(
+            xs,
+            ys,
+            c=node_colours,
+            s=30,
+            zorder=2,
+            edgecolors="black",
+            linewidths=0.3,
+            alpha=0.85,
+        )
 
         # Title with epoch and metrics
         epoch_label = f"Epoch {epoch}" if epoch > 0 else "Epoch 0 (untrained)"
         title_text = f"{epoch_label}  |  val_loss={loss_val:.3f}  val_acc={acc_val:.3f}"
         ax.text(
-            0.5, 1.02, title_text, transform=ax.transAxes,
-            ha="center", va="bottom", fontsize=11, fontweight="bold",
+            0.5,
+            1.02,
+            title_text,
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            fontweight="bold",
         )
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.legend(handles=legend_handles, fontsize=7, loc="lower right",
-                  framealpha=0.8, markerscale=1.0)
+        ax.legend(
+            handles=legend_handles,
+            fontsize=7,
+            loc="lower right",
+            framealpha=0.8,
+            markerscale=1.0,
+        )
 
         camera.snap()
 
@@ -591,8 +673,10 @@ def animate_graph_evolution(
             _capture_frame(epoch, loss_v, acc_v)
 
             if epoch % 50 == 0 or epoch == epochs:
-                print(f"  Captured frame at epoch {epoch:>3d}  "
-                      f"(val_loss={loss_v:.4f}, val_acc={acc_v:.4f})")
+                print(
+                    f"  Captured frame at epoch {epoch:>3d}  "
+                    f"(val_loss={loss_v:.4f}, val_acc={acc_v:.4f})"
+                )
 
     # -- Build animation
     anim = camera.animate(interval=300, blit=False)

@@ -28,7 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.layers import GraphConvolution
+from src.layers import GraphConvolution, KHopGraphConvolution
 
 
 class GCN(nn.Module):
@@ -55,7 +55,7 @@ class GCN(nn.Module):
         self.gc2 = GraphConvolution(n_hidden, n_classes)
         self.dropout = dropout
 
-    def forward(self, x: torch.Tensor, adj: torch.sparse.FloatTensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
 
@@ -77,7 +77,7 @@ class GCN(nn.Module):
         x = self.gc2(x, adj)
         return F.log_softmax(x, dim=1)
 
-    def get_embeddings(self, x: torch.Tensor, adj: torch.sparse.FloatTensor) -> torch.Tensor:
+    def get_embeddings(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
         Return the hidden-layer activations (after ReLU, before dropout).
 
@@ -140,7 +140,7 @@ class DeepGCN(nn.Module):
         # Final layer:  n_hidden -> n_classes
         self.layers.append(GraphConvolution(n_hidden, n_classes))
 
-    def forward(self, x: torch.Tensor, adj: torch.sparse.FloatTensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """Forward pass through all layers."""
         for layer in self.layers[:-1]:
             x = layer(x, adj)
@@ -151,7 +151,7 @@ class DeepGCN(nn.Module):
         x = self.layers[-1](x, adj)
         return F.log_softmax(x, dim=1)
 
-    def get_embeddings(self, x: torch.Tensor, adj: torch.sparse.FloatTensor) -> torch.Tensor:
+    def get_embeddings(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
         Return the activations after the penultimate layer.
 
@@ -162,4 +162,47 @@ class DeepGCN(nn.Module):
         for layer in self.layers[:-1]:
             x = layer(x, adj)
             x = F.relu(x)
+        return x
+
+
+class KHopGCN(nn.Module):
+    """
+    Two-layer GCN where each layer aggregates up to K hops.
+
+    Parameters
+    ----------
+    n_features : int
+    n_hidden   : int
+    n_classes  : int
+    k_hops     : int   -- neighbourhood order K (>= 1)
+    dropout    : float
+    """
+
+    def __init__(
+        self,
+        n_features: int,
+        n_hidden: int = 16,
+        n_classes: int = 7,
+        k_hops: int = 2,
+        dropout: float = 0.5,
+    ):
+        super().__init__()
+        assert k_hops >= 1, "KHopGCN requires k_hops >= 1."
+
+        self.k_hops = k_hops
+        self.kgc1 = KHopGraphConvolution(n_features, n_hidden, k_hops=k_hops)
+        self.kgc2 = KHopGraphConvolution(n_hidden, n_classes, k_hops=k_hops)
+        self.dropout = dropout
+
+    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        x = self.kgc1(x, adj)
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout, training=self.training)
+
+        x = self.kgc2(x, adj)
+        return F.log_softmax(x, dim=1)
+
+    def get_embeddings(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        x = self.kgc1(x, adj)
+        x = F.relu(x)
         return x

@@ -1,0 +1,2 @@
+- [] Ajouter les temps de training, le comparer avec le modèle K != 1
+- [] AJouter peut être un tableau pour les différentes accuracies avec les différents hyperparamètres

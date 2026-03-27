@@ -14,7 +14,6 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class GraphConvolution(nn.Module):
@@ -114,7 +113,10 @@ class KHopGraphConvolution(nn.Module):
 
         # One learnable projection per hop.
         self.weights = nn.ParameterList(
-            [nn.Parameter(torch.FloatTensor(in_features, out_features)) for _ in range(k_hops)]
+            [
+                nn.Parameter(torch.FloatTensor(in_features, out_features))
+                for _ in range(k_hops)
+            ]
         )
 
         if bias:

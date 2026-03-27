@@ -13,7 +13,6 @@ returns structured results suitable for plotting.
 
 import matplotlib.pyplot as plt
 import torch
-import torch.nn.functional as F
 from src.model import GCN, DeepGCN, KHopGCN
 from src.train import train_model
 from src.utils import accuracy, get_best_device, prepare_graph_tensors, set_seed
@@ -474,8 +473,20 @@ def sweep_k_hops(
         )
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot([r[0] for r in results], [r[3] for r in results], "o-", label="Test", linewidth=2)
-    ax.plot([r[0] for r in results], [r[2] for r in results], "s--", label="Validation", linewidth=2)
+    ax.plot(
+        [r[0] for r in results],
+        [r[3] for r in results],
+        "o-",
+        label="Test",
+        linewidth=2,
+    )
+    ax.plot(
+        [r[0] for r in results],
+        [r[2] for r in results],
+        "s--",
+        label="Validation",
+        linewidth=2,
+    )
     ax.set_xlabel("K-hop Order")
     ax.set_ylabel("Accuracy")
     ax.set_title("Effect of K-hop Neighbourhood Order")

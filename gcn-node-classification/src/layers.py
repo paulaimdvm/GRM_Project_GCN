@@ -88,13 +88,19 @@ class GraphConvolution(nn.Module):
 
 class KHopGraphConvolution(nn.Module):
     """
-    K-hop graph convolution using a polynomial graph filter.
+    K-hop graph convolution using a **Chebyshev polynomial** filter.
 
-    For hop count K, this layer computes:
+    Implements Eq. 3 from Kipf & Welling (2017):
 
-        output = sum_{k=1..K} (A^k X) W_k  (+ bias)
+        output = sum_{k=0..K}  θ_k · T_k(L̃) · X     (+ bias)
 
-    where A is the normalised adjacency matrix.
+    where T_k are Chebyshev polynomials evaluated on the rescaled Laplacian
+    L̃ = (2/λ_max) L_norm − I, computed via the three-term recurrence:
+
+        T_0(x) = I,   T_1(x) = x,   T_k(x) = 2x T_{k-1}(x) − T_{k-2}(x)
+
+    This requires exactly **K sparse matrix–vector multiplications** per
+    forward pass, giving O(K |E|) complexity — linear in K.
     """
 
     def __init__(
@@ -111,11 +117,11 @@ class KHopGraphConvolution(nn.Module):
         self.out_features = out_features
         self.k_hops = k_hops
 
-        # One learnable projection per hop.
+        # One learnable projection per Chebyshev order (k = 0 … K).
         self.weights = nn.ParameterList(
             [
                 nn.Parameter(torch.FloatTensor(in_features, out_features))
-                for _ in range(k_hops)
+                for _ in range(k_hops + 1)  # K+1 terms (including k=0)
             ]
         )
 
@@ -138,13 +144,33 @@ class KHopGraphConvolution(nn.Module):
             return torch.spmm(adj, x)
         return torch.mm(adj, x)
 
-    def forward(self, x: torch.Tensor, adj: torch.sparse.FloatTensor) -> torch.Tensor:
-        h = x
-        output = 0.0
+    def forward(self, x: torch.Tensor, L_tilde: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass using Chebyshev recurrence on the scaled Laplacian.
 
-        for k in range(self.k_hops):
-            h = self._aggregate_once(adj, h)  # h now stores A^(k+1) X
-            output = output + torch.mm(h, self.weights[k])
+        Parameters
+        ----------
+        x       : (N, in_features)  — node features
+        L_tilde : (N, N)            — rescaled Laplacian  (2/λ_max) L − I
+
+        Returns
+        -------
+        output  : (N, out_features)
+        """
+        # T_0(L̃)·X = X  (identity)
+        T_prev = x
+        output = torch.mm(T_prev, self.weights[0])
+
+        if self.k_hops >= 1:
+            # T_1(L̃)·X = L̃·X  →  one spmm
+            T_curr = self._aggregate_once(L_tilde, x)
+            output = output + torch.mm(T_curr, self.weights[1])
+
+            # T_k = 2·L̃·T_{k-1} − T_{k-2}  →  one spmm per step
+            for k in range(2, self.k_hops + 1):
+                T_next = 2.0 * self._aggregate_once(L_tilde, T_curr) - T_prev
+                output = output + torch.mm(T_next, self.weights[k])
+                T_prev, T_curr = T_curr, T_next
 
         if self.bias is not None:
             output = output + self.bias
@@ -157,3 +183,4 @@ class KHopGraphConvolution(nn.Module):
             f"{self.in_features} → {self.out_features}, K={self.k_hops}"
             f")"
         )
+

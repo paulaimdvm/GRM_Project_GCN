@@ -407,24 +407,38 @@ def sweep_k_hops(
     epochs: int = 200,
     seed: int = 42,
     device: str = None,
+    L_tilde: torch.Tensor = None,
 ):
     """
     Evaluate K-hop GCN performance for different neighbourhood orders K.
+
+    Parameters
+    ----------
+    L_tilde : torch.Tensor, optional
+        Rescaled Laplacian for Chebyshev filtering.  If *None*, it is
+        computed automatically from ``adj`` (which should then be the
+        *raw* scipy adjacency, not the normalised one).
 
     Returns
     -------
     results : list of (k_hops, train_acc, val_acc, test_acc)
     fig     : matplotlib.figure.Figure
     """
+    if L_tilde is None:
+        raise ValueError(
+            "sweep_k_hops now requires the rescaled Laplacian L_tilde.  "
+            "Use preprocess_chebyshev(adj) to compute it."
+        )
+
     set_seed(seed)
     target_device = get_best_device(device)
 
     n_features = features.shape[1]
     n_classes = labels.max().item() + 1
 
-    features, adj, labels, idx_train, idx_val, idx_test = prepare_graph_tensors(
+    features, L_tilde, labels, idx_train, idx_val, idx_test = prepare_graph_tensors(
         features=features,
-        adj=adj,
+        adj=L_tilde,
         labels=labels,
         idx_train=idx_train,
         idx_val=idx_val,
@@ -448,7 +462,7 @@ def sweep_k_hops(
         train_model(
             model,
             features,
-            adj,
+            L_tilde,
             labels,
             idx_train,
             idx_val,
@@ -461,7 +475,7 @@ def sweep_k_hops(
 
         model.eval()
         with torch.no_grad():
-            output = model(features, adj)
+            output = model(features, L_tilde)
             train_acc = accuracy(output[idx_train], labels[idx_train])
             val_acc = accuracy(output[idx_val], labels[idx_val])
             test_acc = accuracy(output[idx_test], labels[idx_test])
@@ -495,3 +509,4 @@ def sweep_k_hops(
     plt.tight_layout()
 
     return results, fig
+

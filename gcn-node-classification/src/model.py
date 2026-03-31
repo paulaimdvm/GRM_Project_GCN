@@ -166,14 +166,18 @@ class DeepGCN(nn.Module):
 
 class KHopGCN(nn.Module):
     """
-    Two-layer GCN where each layer aggregates up to K hops.
+    Two-layer GCN where each layer uses a K-th order Chebyshev filter.
+
+    The forward pass expects the **rescaled Laplacian** L̃ (not the
+    normalised adjacency) so that the layers can apply the Chebyshev
+    recurrence efficiently.
 
     Parameters
     ----------
     n_features : int
     n_hidden   : int
     n_classes  : int
-    k_hops     : int   -- neighbourhood order K (>= 1)
+    k_hops     : int   -- Chebyshev polynomial order K (>= 1)
     dropout    : float
     """
 
@@ -193,15 +197,24 @@ class KHopGCN(nn.Module):
         self.kgc2 = KHopGraphConvolution(n_hidden, n_classes, k_hops=k_hops)
         self.dropout = dropout
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        x = self.kgc1(x, adj)
+    def forward(self, x: torch.Tensor, L_tilde: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass.
+
+        Parameters
+        ----------
+        x       : (N, n_features) — node features
+        L_tilde : (N, N)          — rescaled Laplacian
+        """
+        x = self.kgc1(x, L_tilde)
         x = F.relu(x)
         x = F.dropout(x, self.dropout, training=self.training)
 
-        x = self.kgc2(x, adj)
+        x = self.kgc2(x, L_tilde)
         return F.log_softmax(x, dim=1)
 
-    def get_embeddings(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        x = self.kgc1(x, adj)
+    def get_embeddings(self, x: torch.Tensor, L_tilde: torch.Tensor) -> torch.Tensor:
+        x = self.kgc1(x, L_tilde)
         x = F.relu(x)
         return x
+
